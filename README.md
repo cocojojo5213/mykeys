@@ -1,11 +1,17 @@
 # MyKeys
 
 <p align="center">
-  <strong>A Telegram bot for managing passwords, powered by Cloudflare Workers.</strong>
+  <strong>🔐 Telegram Password Manager on Cloudflare Workers</strong>
 </p>
 
 <p align="center">
   English | <a href="README_CN.md">中文</a>
+</p>
+
+<p align="center">
+  <a href="https://deploy.workers.cloudflare.com/?url=https://github.com/cocojojo5213/mykeys">
+    <img src="https://deploy.workers.cloudflare.com/button" alt="Deploy to Cloudflare Workers">
+  </a>
 </p>
 
 <p align="center">
@@ -14,119 +20,119 @@
 
 ---
 
-Send a message to save credentials, send a keyword to search them back. All sensitive data is encrypted with AES-256-GCM and stored in Cloudflare D1. Zero cost, no server needed.
+A personal password manager bot for Telegram. Interactive guided input, expiry reminders, AES-256-GCM encryption. Runs on Cloudflare Workers free tier.
 
-## Features
+## ✨ Features
 
-- Save credentials by sending: `name site account password [notes]`
-- Fuzzy search by keyword, tap inline buttons to view details
-- Tap /list in the menu to browse all saved entries
-- Delete entries with inline buttons
-- Only your Telegram account can access the bot
+- **Interactive Input** - Just send a name, bot guides you through site → account → password → expiry → notes
+- **Expiry Reminders** - Set expiry dates, get notified 7/3/1 days before
+- **Long Text Storage** - Save SSH keys, certificates, API tokens with `#存 name`
+- **Fuzzy Search** - Send any keyword to search
+- **AES-256-GCM Encryption** - All sensitive data encrypted at rest
+- **Zero Cost** - Runs entirely on Cloudflare free tier
 
-## Security
+## 🚀 One-Click Deploy
 
-- Account, password, and notes are AES-256-GCM encrypted at rest
-- Bot token, encryption key, and admin secret stored via Cloudflare Secrets (never in code)
-- Admin endpoints (/init, /setWebhook) require a secret key to access
-- Telegram User ID verification -- only your ID is allowed
-- All undefined paths return 404
+[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/cocojojo5213/mykeys)
 
-## Prerequisites
+After clicking, you'll need to:
+1. Set your D1 database ID in `wrangler.toml`
+2. Set secrets (see below)
+3. Initialize database and webhook
 
-- A Cloudflare account (free tier is enough)
+## 📦 Manual Setup
+
+### Prerequisites
+- Cloudflare account (free)
 - Node.js 18+
-- A Telegram Bot (create via [@BotFather](https://t.me/BotFather))
-- Your Telegram User ID (get from [@userinfobot](https://t.me/userinfobot))
+- Telegram Bot token ([@BotFather](https://t.me/BotFather))
+- Your Telegram User ID ([@userinfobot](https://t.me/userinfobot))
 
-## Quick Start
-
-### 1. Clone and install
+### Steps
 
 ```bash
+# Clone
 git clone https://github.com/cocojojo5213/mykeys.git
 cd mykeys
 npm install
-```
 
-### 2. Log in to Cloudflare
-
-```bash
+# Login to Cloudflare
 npx wrangler login
-```
 
-### 3. Create the database
-
-```bash
+# Create database
 npx wrangler d1 create password-bot-db
-```
+# Copy the database_id to wrangler.toml
 
-Copy the `database_id` from the output, open `wrangler.toml`, and replace `your-database-id-here` with it.
+# Set your Telegram User ID in wrangler.toml
+# ALLOWED_USER_ID = "your-telegram-user-id"
 
-Also set `ALLOWED_USER_ID` to your Telegram User ID.
-
-### 4. Set secrets
-
-Three secrets are required:
-
-| Secret | Description |
-|---|---|
-| `TELEGRAM_BOT_TOKEN` | Token from @BotFather |
-| `ENCRYPT_KEY` | A 32-character string for AES encryption. **Do not lose or change it.** |
-| `ADMIN_SECRET` | Key for accessing admin endpoints |
-
-```bash
+# Set secrets
 npx wrangler secret put TELEGRAM_BOT_TOKEN
-npx wrangler secret put ENCRYPT_KEY
+npx wrangler secret put ENCRYPT_KEY      # 32-char string, DO NOT LOSE
 npx wrangler secret put ADMIN_SECRET
-```
 
-Or bulk set via a temporary file:
-
-```bash
-# Create .secrets.json (delete it after!)
-npx wrangler secret bulk .secrets.json
-rm .secrets.json
-```
-
-### 5. Deploy
-
-```bash
+# Deploy
 npx wrangler deploy
+
+# Initialize (replace with your values)
+# Visit: https://mykeys.xxx.workers.dev/init?key=YOUR_ADMIN_SECRET
+# Visit: https://mykeys.xxx.workers.dev/setWebhook?key=YOUR_ADMIN_SECRET
 ```
 
-### 6. Initialize database and webhook
+## 📖 Usage
 
-Visit these URLs in your browser (replace with your actual values):
-
+### Save Account (Interactive)
 ```
-https://mykeys.xxx.workers.dev/init?key=YOUR_ADMIN_SECRET
-https://mykeys.xxx.workers.dev/setWebhook?key=YOUR_ADMIN_SECRET
+You: gpt team车位号
+Bot: 📝 保存「gpt team车位号」
+     🌐 请输入网站：
+You: chat.openai.com
+Bot: 👤 请输入账号：
+You: test@mail.com
+Bot: 🔑 请输入密码：
+You: mypassword123
+Bot: 📅 需要设置到期提醒吗？
+     [不需要] [7天后] [30天后] [90天后] [1年后] [自定义]
+You: (click 30天后)
+Bot: 📝 需要添加备注吗？
+     [不需要，直接保存]
+You: 每月续费
+Bot: ✅ 保存成功！
 ```
 
-Done. Open your bot in Telegram and start saving passwords.
+### Save Long Text (SSH Keys, etc.)
+```
+#存 服务器密钥 @2025-12-31
+-----BEGIN OPENSSH PRIVATE KEY-----
+b3BlbnNzaC1rZXktdjEAAAAABG5vbmU...
+-----END OPENSSH PRIVATE KEY-----
+```
 
-## Usage
+### Commands
+| Command | Description |
+|---------|-------------|
+| `/list` | View all entries |
+| `/expiring` | View entries expiring in 30 days |
+| `/cancel` | Cancel current operation |
+| `/help` | Show help |
 
-| Action | How |
-|---|---|
-| **Save** | Send: `claude claude.ai test@mail.com abc123` |
-| **Save with notes** | Send: `github github.com user pass 2FA enabled` |
-| **Save long text** | First line: `#存 name`, rest is content (SSH keys, etc.) |
-| **Search** | Send a keyword like `cla` -- fuzzy matching |
-| **List all** | Tap /list in the menu |
-| **Delete** | Tap the delete button on any entry |
+### Search
+Just send any keyword - fuzzy matching on name and site.
 
-## Important Notes
+## 🔒 Security
 
-- **Do not change `ENCRYPT_KEY`** after saving data -- old entries will become unreadable
+- AES-256-GCM encryption for account, password, notes
+- Secrets stored via Cloudflare Secrets (not in code)
+- Admin endpoints require secret key
+- Telegram User ID verification
+- Session timeout (5 minutes)
+
+## ⚠️ Important
+
+- **DO NOT change `ENCRYPT_KEY`** after saving data - old entries become unreadable
 - Enable 2FA on your Cloudflare account
-- Consider enabling auto-delete messages in your Telegram chat with the bot
+- Consider enabling auto-delete messages in Telegram
 
-## Tech Stack
-
-Cloudflare Workers / D1 / Secrets / Web Crypto API (AES-256-GCM) / TypeScript / Wrangler
-
-## License
+## 📄 License
 
 MIT
