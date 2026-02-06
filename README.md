@@ -112,6 +112,7 @@ Done. Open your bot in Telegram and start saving passwords.
 |---|---|
 | **Save** | Send: `claude claude.ai test@mail.com abc123` |
 | **Save with notes** | Send: `github github.com user pass 2FA enabled` |
+| **Save long text** | First line: `#存 name`, rest is content (SSH keys, etc.) |
 | **Search** | Send a keyword like `cla` -- fuzzy matching |
 | **List all** | Tap /list in the menu |
 | **Delete** | Tap the delete button on any entry |

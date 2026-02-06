@@ -72,22 +72,30 @@ async function decrypt(b64: string, secret: string): Promise<string> {
 
 const HELP_TEXT = `🔐 密码管理机器人
 
-保存：直接发送信息
+保存账号（空格分隔）：
   用途 网站 账号 密码
   用途 网站 账号 密码 备注
 
 例如：
   claude claude.ai test@mail.com mypass123
-  github github.com zhangsan abc123 2FA已开
+
+保存长文本（SSH密钥等）：
+  第一行：#存 名称
+  后面的内容原样保存
+
+例如：
+  #存 服务器密钥
+  -----BEGIN OPENSSH PRIVATE KEY-----
+  xxxxx
+  -----END OPENSSH PRIVATE KEY-----
 
 查询：直接输入关键词，模糊搜索
-  例如发送 "cla" 就能找到 claude
 
 菜单命令：
   /list - 查看所有已保存条目
   /help - 显示帮助
 
-🔒 所有密码均 AES-GCM 加密存储`;
+🔒 所有敏感信息 AES-GCM 加密存储`;
 
 // ========== 主入口 ==========
 
@@ -175,7 +183,31 @@ async function handleMessage(env: Env, chatId: number, text: string) {
     return showList(env, chatId);
   }
 
-  // 4段以上 = 保存
+  // 多行保存模式：#存 名称\n内容
+  if (text.startsWith("#存 ") || text.startsWith("#存\n")) {
+    const firstLineEnd = text.indexOf("\n");
+    if (firstLineEnd === -1) {
+      return sendMessage(env, chatId, "❓ 格式：#存 名称\\n内容");
+    }
+    const name = text.slice(3, firstLineEnd).trim();
+    const content = text.slice(firstLineEnd + 1).trim();
+    if (!name || !content) {
+      return sendMessage(env, chatId, "❓ 名称和内容都不能为空");
+    }
+
+    const encContent = await encrypt(content, env.ENCRYPT_KEY);
+
+    await env.DB.prepare(
+      "INSERT INTO secrets (name, site, account, password, extra) VALUES (?, ?, ?, ?, ?)"
+    )
+      .bind(name, "raw", "", encContent, null)
+      .run();
+
+    const preview = content.length > 30 ? content.slice(0, 30) + "..." : content;
+    return sendMessage(env, chatId, `✅ 已保存「${name}」\n📄 ${preview}`);
+  }
+
+  // 4段以上 = 保存账号密码
   const parts = text.split(/\s+/);
   if (parts.length >= 4) {
     const [name, site, account, password, ...rest] = parts;
@@ -271,12 +303,20 @@ async function showDetail(env: Env, chatId: number, id: number) {
     return sendMessage(env, chatId, "❌ 记录不存在");
   }
 
-  const account = await decrypt(row.account, env.ENCRYPT_KEY);
-  const password = await decrypt(row.password, env.ENCRYPT_KEY);
-  const extra = row.extra ? await decrypt(row.extra, env.ENCRYPT_KEY) : null;
+  let msg: string;
 
-  let msg = `🔐 ${row.name}\n🌐 ${row.site}\n👤 ${account}\n🔑 ${password}`;
-  if (extra) msg += `\n📝 ${extra}`;
+  if (row.site === "raw") {
+    // 长文本模式
+    const content = await decrypt(row.password, env.ENCRYPT_KEY);
+    msg = `🔐 ${row.name}\n\n${content}`;
+  } else {
+    // 账号密码模式
+    const account = await decrypt(row.account, env.ENCRYPT_KEY);
+    const password = await decrypt(row.password, env.ENCRYPT_KEY);
+    const extra = row.extra ? await decrypt(row.extra, env.ENCRYPT_KEY) : null;
+    msg = `🔐 ${row.name}\n🌐 ${row.site}\n👤 ${account}\n🔑 ${password}`;
+    if (extra) msg += `\n📝 ${extra}`;
+  }
 
   const buttons = [[{ text: "🗑️ 删除", callback_data: `del_${row.id}` }]];
   await sendMessageWithKeyboard(env, chatId, msg, buttons);

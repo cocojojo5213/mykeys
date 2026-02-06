@@ -122,6 +122,7 @@ https://mykeys.xxx.workers.dev/setWebhook?key=你的ADMIN_SECRET
 |---|---|
 | **保存** | 发送：`claude claude.ai test@mail.com abc123` |
 | **带备注保存** | 发送：`github github.com user pass 开了2FA` |
+| **保存长文本** | 第一行：`#存 名称`，后面的内容原样保存（SSH密钥等） |
 | **搜索** | 发关键词，比如 `cla`，支持模糊匹配 |
 | **查看全部** | 点菜单里的 /list |
 | **删除** | 查看详情时点删除按钮 |
