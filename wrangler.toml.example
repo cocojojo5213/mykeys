@@ -1,0 +1,20 @@
+name = "mykeys"
+main = "src/index.ts"
+compatibility_date = "2026-02-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "password-bot-db"
+database_id = "your-database-id-here"  # npx wrangler d1 list 获取
+
+# 每天早上 9 点（UTC+8 = UTC 1:00）检查到期提醒
+[triggers]
+crons = ["0 1 * * *"]
+
+[vars]
+ALLOWED_USER_ID = "your-telegram-user-id"  # @userinfobot 获取
+
+# 以下通过 wrangler secret put 设置，不要写在这里
+# TELEGRAM_BOT_TOKEN  - @BotFather 获取
+# ENCRYPT_KEY         - 32位字符串，不要丢失！
+# ADMIN_SECRET        - 管理密钥
