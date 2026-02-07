@@ -4,5 +4,4 @@ node_modules/
 .env
 .secrets.json
 worker-configuration.d.ts
-wrangler.toml
 backup.sql

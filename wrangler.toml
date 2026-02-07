@@ -1,0 +1,21 @@
+name = "mykeys"
+main = "src/index.ts"
+compatibility_date = "2026-02-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "password-bot-db"
+database_id = "6961345436c-1427867c-4786786-81d04868716"
+
+# 每天早上 9 点（UTC+8 = UTC 1:00）检查到期提醒
+[triggers]
+crons = ["0 1 * * *"]
+
+[vars]
+ALLOWED_USER_ID = "22222222"
+EMAIL_DOMAINS = "abc.cn,net,xx.com"
+
+# 以下通过 wrangler secret put 设置，不要写在这里
+# TELEGRAM_BOT_TOKEN
+# ENCRYPT_KEY
+# ADMIN_SECRET
