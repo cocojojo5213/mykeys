@@ -4,6 +4,7 @@ interface Env {
   ALLOWED_USER_ID: string;
   ENCRYPT_KEY: string;
   ADMIN_SECRET: string;
+  EMAIL_DOMAINS: string;
 }
 
 interface TelegramUpdate {
@@ -16,10 +17,21 @@ interface SecretRow {
   extra: string | null; expires_at: string | null; created_at: string;
 }
 
-type SessionStep = 'idle' | 'ask_site' | 'ask_account' | 'ask_password' | 'ask_expiry' | 'ask_extra';
+interface EmailRow {
+  id: number; address: string; local_part: string; domain: string;
+  name: string; created_at: string;
+}
+
+interface EmailMessageRow {
+  id: number; email_id: number; from_addr: string; subject: string;
+  body: string; received_at: string;
+}
+
+type SessionStep = 'idle' | 'ask_site' | 'ask_account' | 'ask_password' | 'ask_expiry' | 'ask_extra' | 'ask_email_domain' | 'ask_email_note';
 interface SessionData {
   step: SessionStep; name?: string; site?: string; account?: string;
   password?: string; expiresAt?: string | null; extra?: string | null;
+  emailLocalPart?: string; emailDomain?: string;
 }
 
 // ========== 缓存密钥 ==========
@@ -127,7 +139,9 @@ export default {
       if (url.searchParams.get('key') !== env.ADMIN_SECRET) return new Response('Forbidden', { status: 403 });
       await env.DB.batch([
         env.DB.prepare(`CREATE TABLE IF NOT EXISTS secrets(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,site TEXT DEFAULT'',account TEXT DEFAULT'',password TEXT DEFAULT'',extra TEXT,expires_at DATE,created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`),
-        env.DB.prepare(`CREATE TABLE IF NOT EXISTS sessions(user_id INTEGER PRIMARY KEY,step TEXT,data TEXT,updated_at DATETIME)`)
+        env.DB.prepare(`CREATE TABLE IF NOT EXISTS sessions(user_id INTEGER PRIMARY KEY,step TEXT,data TEXT,updated_at DATETIME)`),
+        env.DB.prepare(`CREATE TABLE IF NOT EXISTS email_addresses(id INTEGER PRIMARY KEY AUTOINCREMENT,address TEXT UNIQUE,local_part TEXT,domain TEXT,name TEXT,created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`),
+        env.DB.prepare(`CREATE TABLE IF NOT EXISTS email_messages(id INTEGER PRIMARY KEY AUTOINCREMENT,email_id INTEGER,from_addr TEXT,subject TEXT,body TEXT,received_at DATETIME DEFAULT CURRENT_TIMESTAMP,FOREIGN KEY(email_id)REFERENCES email_addresses(id))`)
       ]);
       return new Response('OK');
     }
@@ -167,13 +181,15 @@ async function handleMessage(env: Env, chatId: number, uid: number, text: string
   if (text === '/menu') {
     await sendKb(env, chatId, '🔐 选择操作：', [
       [{ text: '📋 全部', callback_data: 'm_list' }, { text: '🔍 搜索', callback_data: 'm_search' }],
-      [{ text: '⏰ 到期', callback_data: 'm_exp' }, { text: '💾 备份', callback_data: 'm_backup' }]
+      [{ text: '⏰ 到期', callback_data: 'm_exp' }, { text: '💾 备份', callback_data: 'm_backup' }],
+      [{ text: '📧 邮箱', callback_data: 'm_email' }]
     ]);
     return;
   }
   if (text === '/list') { await showList(env, chatId); return; }
   if (text === '/expiring') { await showExpiring(env, chatId); return; }
   if (text === '/backup') { await sendBackup(env, chatId); return; }
+  if (text === '/emails') { await showEmails(env, chatId); return; }
   if (text === '/cancel') { await clearSession(env, uid); await send(env, chatId, '✅ 已取消'); return; }
 
   const session = await getSession(env, uid);
@@ -203,6 +219,21 @@ async function handleMessage(env: Env, chatId: number, uid: number, text: string
     if (!exp) { await send(env, chatId, '❓ 日期格式不对'); return; }
     await env.DB.prepare('UPDATE secrets SET expires_at=? WHERE id=?').bind(exp, +id).run();
     await send(env, chatId, `✅ 到期：${exp}`);
+    return;
+  }
+
+  // #邮箱 创建
+  if (text.startsWith('#邮箱 ')) {
+    const localPart = text.slice(4).trim().toLowerCase();
+    if (!localPart || !/^[a-z0-9._-]+$/.test(localPart)) {
+      await send(env, chatId, '❓ 邮箱地址只能包含字母、数字、点、下划线和横线');
+      return;
+    }
+    await setSession(env, uid, { step: 'ask_email_domain', emailLocalPart: localPart });
+    const domains = env.EMAIL_DOMAINS.split(',');
+    await sendKb(env, chatId, `📧 创建邮箱 ${localPart}@...\n\n选择域名：`,
+      domains.map((d, i) => [{ text: d, callback_data: `edom_${i}` }])
+    );
     return;
   }
 
@@ -242,6 +273,14 @@ async function handleFlow(env: Env, chatId: number, uid: number, text: string, s
     return;
   }
   if (s.step === 'ask_extra') { s.extra = text; await saveFinish(env, chatId, uid, s); return; }
+  if (s.step === 'ask_email_note') {
+    if (!s.emailLocalPart || !s.emailDomain) return;
+    const address = `${s.emailLocalPart}@${s.emailDomain}`;
+    await env.DB.prepare('INSERT INTO email_addresses(address,local_part,domain,name)VALUES(?,?,?,?)').bind(address, s.emailLocalPart, s.emailDomain, text).run();
+    await clearSession(env, uid);
+    await send(env, chatId, `已创建邮箱\n\n${address}\n备注: ${text}\n\n发到这个地址的邮件将转发到此对话`);
+    return;
+  }
 }
 
 async function saveFinish(env: Env, chatId: number, uid: number, s: SessionData) {
@@ -269,6 +308,7 @@ async function handleCallback(env: Env, cb: NonNullable<TelegramUpdate['callback
   if (d === 'm_exp') { await showExpiring(env, chatId); return; }
   if (d === 'm_backup') { await sendBackup(env, chatId); return; }
   if (d === 'm_search') { await send(env, chatId, '🔍 直接发送关键词搜索'); return; }
+  if (d === 'm_email') { await showEmails(env, chatId); return; }
 
   // 到期选择
   if (d.startsWith('e_')) {
@@ -307,6 +347,70 @@ async function handleCallback(env: Env, cb: NonNullable<TelegramUpdate['callback
 
   // 设置到期
   if (d.startsWith('s_')) { await send(env, chatId, `📅 回复：#到期 ${d.slice(2)} 2025-12-31\n取消：#到期 ${d.slice(2)} 无`); return; }
+
+  // 邮箱域名选择
+  if (d.startsWith('edom_')) {
+    const s = await getSession(env, uid);
+    if (s.step !== 'ask_email_domain' || !s.emailLocalPart) return;
+    const domains = env.EMAIL_DOMAINS.split(',');
+    const domain = domains[+d.slice(5)];
+    if (!domain) return;
+    const address = `${s.emailLocalPart}@${domain}`;
+    // 检查是否已存在
+    const exists = await env.DB.prepare('SELECT id FROM email_addresses WHERE address=?').bind(address).first();
+    if (exists) {
+      await clearSession(env, uid);
+      await send(env, chatId, `❌ 邮箱 ${address} 已存在`);
+      return;
+    }
+    s.emailDomain = domain;
+    s.step = 'ask_email_note';
+    await setSession(env, uid, s);
+    await sendKb(env, chatId, `邮箱地址: ${address}\n\n请输入备注（说明这个邮箱用来做什么）:`,
+      [[{ text: '不需要备注', callback_data: 'enote_skip' }]]
+    );
+    return;
+  }
+
+  // 邮箱备注跳过
+  if (d === 'enote_skip') {
+    const s = await getSession(env, uid);
+    if (s.step !== 'ask_email_note' || !s.emailLocalPart || !s.emailDomain) return;
+    const address = `${s.emailLocalPart}@${s.emailDomain}`;
+    await env.DB.prepare('INSERT INTO email_addresses(address,local_part,domain,name)VALUES(?,?,?,?)').bind(address, s.emailLocalPart, s.emailDomain, '').run();
+    await clearSession(env, uid);
+    await send(env, chatId, `已创建邮箱\n\n${address}\n\n发到这个地址的邮件将转发到此对话`);
+    return;
+  }
+
+  // 查看邮箱历史
+  if (d.startsWith('em_')) {
+    const emailId = +d.slice(3);
+    const email = await env.DB.prepare('SELECT * FROM email_addresses WHERE id=?').bind(emailId).first<EmailRow>();
+    if (!email) { await send(env, chatId, '❌ 邮箱不存在'); return; }
+    const msgs = await env.DB.prepare('SELECT * FROM email_messages WHERE email_id=? ORDER BY received_at DESC LIMIT 10').bind(emailId).all<EmailMessageRow>();
+    if (!msgs.results?.length) {
+      await sendKb(env, chatId, `📧 ${email.address}\n\n📭 还没有收到邮件`, [[{ text: '🗑️ 删除邮箱', callback_data: `emd_${emailId}` }]]);
+      return;
+    }
+    let msg = `📧 ${email.address}\n\n最近 ${msgs.results.length} 封邮件：\n`;
+    for (const m of msgs.results) {
+      const body = await decrypt(m.body, env.ENCRYPT_KEY);
+      msg += `\n──────────\n📨 ${m.from_addr}\n📋 ${m.subject}\n${body.slice(0, 200)}${body.length > 200 ? '...' : ''}\n`;
+    }
+    await sendKb(env, chatId, msg, [[{ text: '🗑️ 删除邮箱', callback_data: `emd_${emailId}` }]]);
+    return;
+  }
+
+  // 删除邮箱
+  if (d.startsWith('emd_')) {
+    const emailId = +d.slice(4);
+    const email = await env.DB.prepare('SELECT address FROM email_addresses WHERE id=?').bind(emailId).first<EmailRow>();
+    await env.DB.prepare('DELETE FROM email_messages WHERE email_id=?').bind(emailId).run();
+    await env.DB.prepare('DELETE FROM email_addresses WHERE id=?').bind(emailId).run();
+    await send(env, chatId, `🗑️ 已删除邮箱 ${email?.address || emailId}`);
+    return;
+  }
 }
 
 // ========== 列表/详情/备份 ==========
@@ -357,4 +461,15 @@ async function sendBackup(env: Env, chatId: number) {
   fd.append('document', new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), `backup_${new Date().toISOString().slice(0, 10)}.json`);
   fd.append('caption', `💾 备份 ${data.length} 条\n⚠️ 明文密码，妥善保管！`);
   await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendDocument`, { method: 'POST', body: fd });
+}
+
+async function showEmails(env: Env, chatId: number) {
+  const r = await env.DB.prepare('SELECT id,address,name,created_at FROM email_addresses ORDER BY created_at DESC').all<EmailRow>();
+  if (!r.results?.length) {
+    await send(env, chatId, '📭 还没有邮箱\n\n发送 #邮箱 名称 创建');
+    return;
+  }
+  await sendKb(env, chatId, `邮箱列表 (${r.results.length}):`,
+    r.results.map((x: EmailRow) => [{ text: x.name ? `${x.address} (${x.name})` : x.address, callback_data: `em_${x.id}` }])
+  );
 }
